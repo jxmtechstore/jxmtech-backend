@@ -12,7 +12,7 @@ app.post('/api/verify-paypal', async (req, res) => {
       .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
       .join('&');
 
-    // Live PayPal endpoint for real transactions:
+    // Validate IPN with PayPal
     const paypalRes = await fetch('https://ipnpb.paypal.com/cgi-bin/webscr', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -41,6 +41,7 @@ app.post('/api/verify-paypal', async (req, res) => {
 
     const { email, address } = JSON.parse(custom || "{}");
 
+    const orderId = txn_id || `PAID-${Date.now()}`;
     const orderData = {
       data: [{
         email,
@@ -49,10 +50,11 @@ app.post('/api/verify-paypal', async (req, res) => {
         product_price: mc_gross,
         order_date: new Date().toISOString(),
         status: "Paid",
-        order_id: txn_id || `PAID-${Date.now()}`
+        order_id: orderId
       }]
     };
 
+    // Save order to SheetDB
     await fetch("https://sheetdb.io/api/v1/rxstv2pbzdkc3", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -60,7 +62,28 @@ app.post('/api/verify-paypal', async (req, res) => {
     });
 
     console.log("✅ Order recorded:", orderData);
+
+    // Send confirmation email using EmailJS
+    await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        service_id: "service_lkx8hde",
+        template_id: "template_j6e2hbv",
+        user_id: "X5EyJsvtspdoQsts0",
+        template_params: {
+          email,
+          product_name: item_name,
+          order_id: orderId
+        }
+      })
+    });
+
+    console.log("📧 Confirmation email sent to:", email);
     res.sendStatus(200);
+
   } catch (err) {
     console.error("❌ Error verifying PayPal:", err);
     res.sendStatus(500);
